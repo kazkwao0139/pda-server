@@ -1,5 +1,10 @@
 // PDA 멀티플레이어 서버
-const http = require('http').createServer();
+const http = require('http').createServer((req, res) => {
+    // Render 헬스체크용 HTTP 응답
+    res.writeHead(200);
+    res.end('PDA Server Running');
+});
+
 const io = require('socket.io')(http, {
     cors: { origin: "*" }
 });
@@ -23,12 +28,11 @@ io.on('connection', (socket) => {
         const player = {
             id: socket.id,
             name: data.name || `Player ${lobbyPlayers.length + 1}`,
-            team: lobbyPlayers.length % 2,  // 번갈아 팀 배정
+            team: lobbyPlayers.length % 2,
             isHost: socket.id === hostId
         };
         lobbyPlayers.push(player);
         
-        // 모든 플레이어에게 로비 상태 전송
         io.emit('lobby_update', { players: lobbyPlayers, hostId });
         console.log('로비:', lobbyPlayers.map(p => p.name));
     });
@@ -51,9 +55,8 @@ io.on('connection', (socket) => {
         }
     });
     
-    // 플레이어 입력 전송 (클라이언트 → 서버 → 호스트)
+    // 플레이어 입력 전송
     socket.on('player_input', (data) => {
-        // 호스트에게만 전달
         if (hostId && socket.id !== hostId) {
             io.to(hostId).emit('player_input', {
                 id: socket.id,
@@ -62,7 +65,7 @@ io.on('connection', (socket) => {
         }
     });
     
-    // 게임 상태 동기화 (호스트 → 서버 → 모든 클라이언트)
+    // 게임 상태 동기화
     socket.on('game_state', (state) => {
         if (socket.id === hostId) {
             socket.broadcast.emit('game_state', state);
@@ -74,7 +77,6 @@ io.on('connection', (socket) => {
         console.log('플레이어 퇴장:', socket.id);
         lobbyPlayers = lobbyPlayers.filter(p => p.id !== socket.id);
         
-        // 호스트가 나가면 게임 리셋
         if (socket.id === hostId) {
             console.log('호스트 퇴장 - 게임 리셋');
             hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
@@ -90,12 +92,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-    console.log('========================================');
-    console.log('  PDA 멀티플레이어 서버 시작!');
-    console.log('  포트:', PORT);
-    console.log('========================================');
-    console.log('');
-    console.log('  다른 PC에서 접속하려면:');
-    console.log('  cmd에서 ipconfig 쳐서 IPv4 주소 확인');
-    console.log('');
+    console.log('PDA 서버 시작! 포트:', PORT);
 });
