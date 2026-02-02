@@ -421,7 +421,8 @@ io.on('connection', (socket) => {
         };
         lobbyPlayers.push(player);
         
-        io.emit('lobby_update', { players: lobbyPlayers });
+        const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+        io.emit('lobby_update', { players: lobbyPlayers, hostId });
         console.log('로비:', lobbyPlayers.map(p => p.name));
     });
     
@@ -429,7 +430,8 @@ io.on('connection', (socket) => {
         const player = lobbyPlayers.find(p => p.id === socket.id);
         if (player) {
             player.team = team;
-            io.emit('lobby_update', { players: lobbyPlayers });
+            const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+            io.emit('lobby_update', { players: lobbyPlayers, hostId });
         }
     });
     
@@ -463,7 +465,8 @@ io.on('connection', (socket) => {
         lobbyPlayers = lobbyPlayers.filter(p => p.id !== socket.id);
         
         if (!gameStarted) {
-            io.emit('lobby_update', { players: lobbyPlayers });
+            const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+            io.emit('lobby_update', { players: lobbyPlayers, hostId });
         }
         
         // 모두 나가면 게임 리셋
