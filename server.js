@@ -1546,6 +1546,11 @@ function respawn(p) {
     p.stunTimer = 0;
     p.channeling = false;
     p.recalling = false;
+    // AI 상태 리셋
+    p.currentNode = p.team === 0 ? 'A_Guardian' : 'B_Guardian';
+    p.targetNode = null;
+    p.aiAction = null;
+    p.aiActionTimer = 0;
 }
 
 function checkLevelUp(teamId) {
