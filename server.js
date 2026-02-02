@@ -1688,6 +1688,6 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
+http.listen(PORT, '0.0.0.0', () => {
     console.log('PDA 중앙 서버 시작! 포트:', PORT);
 });
