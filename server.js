@@ -114,6 +114,19 @@ const BUSHES = [
     { x: 115, y: 95, radius: 5 },
 ];
 
+// 텔레포트 패널
+const TELEPORT_PANELS = {
+    'A_TP_T2L': { x: 97, y: 205, targetNode: 'A_T2_L', team: 0 },
+    'A_TP_T2R': { x: 113, y: 205, targetNode: 'A_T2_R', team: 0 },
+    'A_TP_BT2L': { x: 97, y: 195, targetNode: 'B_T2_L', team: 0 },
+    'A_TP_BT2R': { x: 113, y: 195, targetNode: 'B_T2_R', team: 0 },
+    'B_TP_T2L': { x: 97, y: 15, targetNode: 'B_T2_L', team: 1 },
+    'B_TP_T2R': { x: 113, y: 15, targetNode: 'B_T2_R', team: 1 },
+    'B_TP_AT2L': { x: 97, y: 5, targetNode: 'A_T2_L', team: 1 },
+    'B_TP_AT2R': { x: 113, y: 5, targetNode: 'A_T2_R', team: 1 },
+};
+const TELEPORT_PANEL_RADIUS = 2.5;
+
 // ==================== GAME STATE ====================
 let lobbyPlayers = [];
 let gameStarted = false;
@@ -154,6 +167,33 @@ function isAtBase(p) {
     const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
     const base = game.nodes[baseId];
     return distance(p, base) < 20;
+}
+
+// 텔레포트 가능 여부
+function canTeleport(p, panelId) {
+    const panel = TELEPORT_PANELS[panelId];
+    if (panel.team !== p.team) return false;
+    const targetNode = game.nodes[panel.targetNode];
+    return targetNode.owner === p.team;
+}
+
+// 플레이어가 패널 위에 있으면 텔포
+function checkAndTeleport(p) {
+    for (const [panelId, panel] of Object.entries(TELEPORT_PANELS)) {
+        if (panel.team !== p.team) continue;
+        if (distance(p, panel) < TELEPORT_PANEL_RADIUS) {
+            if (canTeleport(p, panelId)) {
+                const targetNode = game.nodes[panel.targetNode];
+                p.x = targetNode.x;
+                p.y = targetNode.y;
+                if (p.isAI) {
+                    p.currentNode = panel.targetNode;
+                }
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // 점과 선분 사이 최단 거리
@@ -528,6 +568,9 @@ function updatePlayer(p, dt) {
         const len = Math.sqrt(dirX * dirX + dirY * dirY);
         
         if (len > 0) {
+            const startX = p.x;
+            const startY = p.y;
+            
             const dx = (dirX / len) * spec.dashDist;
             const dy = (dirY / len) * spec.dashDist;
             
@@ -546,6 +589,16 @@ function updatePlayer(p, dt) {
             p.x = dashX;
             p.y = dashY;
             p.dashCooldown = spec.dashCool;
+            
+            // 대시 이펙트
+            game.dashEffects.push({
+                x1: startX,
+                y1: startY,
+                x2: dashX,
+                y2: dashY,
+                team: p.team,
+                timer: 0.2,
+            });
         }
         p.input.e = false;
         return;
@@ -590,6 +643,15 @@ function updatePlayer(p, dt) {
             }
         }
         
+        // 궁극기 이펙트
+        game.ultEffects.push({
+            x: ultX,
+            y: ultY,
+            radius: spec.ultRadius,
+            team: p.team,
+            timer: 0.5,
+        });
+        
         p.ultCooldown = spec.ultCool;
         p.input.q = false;
         return;
@@ -626,6 +688,9 @@ function updatePlayer(p, dt) {
     // 맵 경계
     p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
     p.y = Math.max(5, Math.min(CONFIG.MAP_HEIGHT - 5, p.y));
+    
+    // 텔레포트 패널 체크
+    checkAndTeleport(p);
     
     // 공격
     if (input.mouseDown && p.attackCooldown <= 0) {
