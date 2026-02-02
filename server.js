@@ -169,6 +169,34 @@ function isAtBase(p) {
     return distance(p, base) < 20;
 }
 
+// AI 텔포 패널 선택
+function getAITeleportTarget(p) {
+    const prefix = p.team === 0 ? 'A_TP_' : 'B_TP_';
+    const enemyT2Prefix = p.team === 0 ? 'B_T2' : 'A_T2';
+    
+    let bestPanel = null;
+    let bestScore = -Infinity;
+    
+    for (const [panelId, panel] of Object.entries(TELEPORT_PANELS)) {
+        if (!panelId.startsWith(prefix)) continue;
+        if (!canTeleport(p, panelId)) continue;
+        
+        let score = 0;
+        if (panel.targetNode.startsWith(enemyT2Prefix)) {
+            score = 100;
+        } else {
+            score = 50;
+        }
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestPanel = panelId;
+        }
+    }
+    
+    return bestPanel;
+}
+
 // 텔레포트 가능 여부
 function canTeleport(p, panelId) {
     const panel = TELEPORT_PANELS[panelId];
@@ -1212,6 +1240,26 @@ function updateAI(p, dt) {
         if (p.hp < p.maxHp * 0.8) return;
     }
     
+    // 베이스에서 텔포 패널 사용
+    if (isAtBase(p)) {
+        const tpPanel = getAITeleportTarget(p);
+        if (tpPanel) {
+            const panel = TELEPORT_PANELS[tpPanel];
+            const dx = panel.x - p.x;
+            const dy = panel.y - p.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            
+            if (d < TELEPORT_PANEL_RADIUS) {
+                checkAndTeleport(p);
+                return;
+            } else {
+                p.x += (dx / d) * speed * dt;
+                p.y += (dy / d) * speed * dt;
+                return;
+            }
+        }
+    }
+    
     // 상황 감지
     const sit = detectSituation(p);
     
@@ -1446,6 +1494,16 @@ function tryAttack(p) {
         const armor = WEAPON_SPECS[closest.weaponType].armor;
         closest.hp -= damage * (1 - armor);
         p.attackCooldown = CONFIG.ATTACK_COOLDOWN;
+        
+        // 공격 이펙트
+        game.attackEffects.push({
+            x1: p.x,
+            y1: p.y,
+            x2: closest.x,
+            y2: closest.y,
+            team: p.team,
+            timer: 0.1,
+        });
         
         if (closest.hp <= 0) {
             killPlayer(closest, p);
