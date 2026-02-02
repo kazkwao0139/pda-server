@@ -573,7 +573,8 @@ function updatePlayer(p, dt) {
     // 채널링 중이면
     if (p.channeling) {
         if (!input.f) {
-            failChanneling(p);
+            // 자발적 취소 - 나만 취소
+            cancelChanneling(p);
         } else {
             p.channelProgress += dt;
             if (p.channelProgress >= p.channelTime) {
