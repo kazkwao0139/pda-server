@@ -1712,13 +1712,33 @@ function spawnBreakerIfNeeded() {
 }
 
 function checkWinCondition() {
+    if (game.winner !== null) return; // 이미 끝남
+    
     if (game.nodes['A_Guardian'].owner === 1) {
         game.winner = 1;
         console.log('🔴 레드팀 승리!');
+        endGameAfterDelay();
     } else if (game.nodes['B_Guardian'].owner === 0) {
         game.winner = 0;
         console.log('🔵 블루팀 승리!');
+        endGameAfterDelay();
     }
+}
+
+function endGameAfterDelay() {
+    setTimeout(() => {
+        console.log('게임 리셋, 로비로 복귀');
+        clearInterval(gameInterval);
+        io.emit('game_end', { winner: game.winner });
+        
+        // 로비로 리셋
+        gameStarted = false;
+        game = null;
+        
+        // 기존 플레이어들 로비로
+        const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+        io.emit('lobby_update', { players: lobbyPlayers, hostId });
+    }, 5000);
 }
 
 // ==================== BROADCAST STATE ====================
