@@ -395,8 +395,13 @@ function broadcastState() {
     
     for (const [id, node] of Object.entries(game.nodes)) {
         state.nodes[id] = {
+            x: node.x,
+            y: node.y,
+            tier: node.type,  // type을 tier로 전송
             owner: node.owner,
             hp: Math.round(node.hp),
+            maxHp: node.maxHp,
+            locked: false,
         };
     }
     
