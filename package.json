@@ -1,7 +1,6 @@
 {
   "name": "pda-server",
   "version": "1.0.0",
-  "description": "PDA Multiplayer Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
