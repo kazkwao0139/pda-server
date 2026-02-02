@@ -216,6 +216,9 @@ function checkAndTeleport(p) {
                 p.y = targetNode.y;
                 if (p.isAI) {
                     p.currentNode = panel.targetNode;
+                    p.noRecallTimer = 5; // 텔포 후 5초간 리콜 금지
+                    p.aiAction = null;   // 행동 리셋
+                    p.aiActionTimer = 0;
                 }
                 return true;
             }
@@ -392,6 +395,7 @@ function initGame() {
             currentNode: 'A_Guardian',
             aiAction: null,       // 현재 AI 행동
             aiActionTimer: 0,     // 행동 유지 시간
+            noRecallTimer: 0,     // 리콜 금지 시간
             input: {},
         });
     }
@@ -433,6 +437,7 @@ function initGame() {
             currentNode: 'B_Guardian',
             aiAction: null,
             aiActionTimer: 0,
+            noRecallTimer: 0,
             input: {},
         });
     }
@@ -945,6 +950,7 @@ function detectSituation(p) {
 
 function feDecideAction(p, sit) {
     const options = [];
+    const nearBase = isAtBase(p);
     
     if (sit.hpRatio < 0.4) {
         options.push({
@@ -956,7 +962,8 @@ function feDecideAction(p, sit) {
         });
     }
     
-    if (sit.hpRatio < 0.4 && sit.enemyDist > 30) {
+    // 베이스 근처 또는 텔포 직후면 리콜 안 함
+    if (sit.hpRatio < 0.4 && sit.enemyDist > 30 && !nearBase && p.noRecallTimer <= 0) {
         options.push({
             action: 'recall',
             score: feScore(
@@ -1218,6 +1225,9 @@ function updateAI(p, dt) {
         p.weaponPoints--;
     }
     
+    // 리콜 금지 타이머 감소
+    if (p.noRecallTimer > 0) p.noRecallTimer -= dt;
+    
     // 상태 처리
     if (p.stunTimer > 0) { p.stunTimer -= dt; return; }
     
@@ -1243,6 +1253,8 @@ function updateAI(p, dt) {
     if (isAtBase(p) && p.hp < p.maxHp) {
         p.hp = Math.min(p.maxHp, p.hp + CONFIG.BASE_HEAL_RATE * dt);
         if (p.hp < p.maxHp * 0.8) return;
+        // 힐 완료되면 리콜 금지 (바로 다시 돌아오는 거 방지)
+        p.noRecallTimer = Math.max(p.noRecallTimer, 3);
     }
     
     // 베이스에서 텔포 패널 사용
@@ -1322,7 +1334,7 @@ function updateAI(p, dt) {
             return;
         }
         
-        if (action === 'recall') {
+        if (action === 'recall' && p.noRecallTimer <= 0) {
             p.recalling = true;
             p.recallProgress = 0;
             return;
@@ -1551,6 +1563,7 @@ function respawn(p) {
     p.targetNode = null;
     p.aiAction = null;
     p.aiActionTimer = 0;
+    p.noRecallTimer = 0;
 }
 
 function checkLevelUp(teamId) {
