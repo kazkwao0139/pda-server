@@ -343,70 +343,153 @@ function updateAI(p, dt) {
     if (p.hp < p.maxHp * 0.3 && !isAtBase(p)) {
         const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
         const base = game.nodes[baseId];
-        const dx = base.x - p.x;
-        const dy = base.y - p.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const speed = getPlayerSpeed(p);
-        p.x += (dx / dist) * speed * dt;
-        p.y += (dy / dist) * speed * dt;
+        moveToward(p, base.x, base.y, dt);
         return;
     }
     
-    // 적 찾기
+    // 채널링 중이면 계속
+    if (p.channeling) {
+        const node = game.nodes[p.channelTarget];
+        if (!node || node.owner === p.team || node.locked) {
+            cancelChanneling(p);
+        } else {
+            // 채널링 진행
+            p.channelProgress += dt / NODE_SPECS[node.tier].channelTime;
+            if (p.channelProgress >= 1) {
+                completeChanneling(p);
+            }
+        }
+        return;
+    }
+    
+    // 적 탐지 (사거리 내)
+    const spec = WEAPON_SPECS[p.weaponType];
     const enemies = game.players.filter(e => e.team !== p.team && e.alive);
-    let target = null;
-    let minDist = Infinity;
+    let nearestEnemy = null;
+    let enemyDist = Infinity;
     
     for (const e of enemies) {
         const d = distance(p, e);
-        if (d < minDist && d < 30) {
-            minDist = d;
-            target = e;
+        if (d < enemyDist) {
+            enemyDist = d;
+            nearestEnemy = e;
         }
     }
     
-    const spec = WEAPON_SPECS[p.weaponType];
-    
-    if (target) {
-        // 적 추적
-        const dx = target.x - p.x;
-        const dy = target.y - p.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        if (dist > spec.range * 0.8) {
-            const speed = getPlayerSpeed(p);
-            p.x += (dx / dist) * speed * dt;
-            p.y += (dy / dist) * speed * dt;
+    // 적이 가까우면 공격
+    if (nearestEnemy && enemyDist < 25) {
+        // 사거리 밖이면 접근
+        if (enemyDist > spec.range * 0.9) {
+            moveToward(p, nearestEnemy.x, nearestEnemy.y, dt);
         }
         
         // 공격
-        if (dist <= spec.range && p.attackCooldown <= 0) {
+        if (enemyDist <= spec.range && p.attackCooldown <= 0) {
             const damage = getPlayerDamage(p);
-            const armor = WEAPON_SPECS[target.weaponType].armor;
-            target.hp -= damage * (1 - armor);
+            const armor = WEAPON_SPECS[nearestEnemy.weaponType].armor;
+            nearestEnemy.hp -= damage * (1 - armor);
             p.attackCooldown = CONFIG.ATTACK_COOLDOWN;
             
-            if (target.hp <= 0) {
-                killPlayer(target, p);
+            if (nearestEnemy.hp <= 0) {
+                killPlayer(nearestEnemy, p);
             }
         }
-    } else {
-        // 적 없으면 중앙으로 이동
-        const midX = 105;
-        const midY = 105;
-        const dx = midX - p.x;
-        const dy = midY - p.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        if (dist > 30) {
-            const speed = getPlayerSpeed(p);
-            p.x += (dx / dist) * speed * dt;
-            p.y += (dy / dist) * speed * dt;
+        return;
+    }
+    
+    // 목표 노드 선택 (라인 할당)
+    const targetNode = selectTargetNode(p);
+    if (!targetNode) return;
+    
+    const node = game.nodes[targetNode];
+    const distToNode = distance(p, node);
+    
+    // 노드 근처면 채널링 시작
+    if (distToNode < CONFIG.CHANNEL_RANGE + 3) {
+        if (canAttackNode(node, p.team)) {
+            startChanneling(p, targetNode);
+        }
+        return;
+    }
+    
+    // 노드로 이동
+    moveToward(p, node.x, node.y, dt);
+}
+
+function moveToward(p, tx, ty, dt) {
+    const dx = tx - p.x;
+    const dy = ty - p.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) return;
+    
+    const speed = getPlayerSpeed(p);
+    p.x += (dx / dist) * speed * dt;
+    p.y += (dy / dist) * speed * dt;
+    p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
+    p.y = Math.max(5, Math.min(CONFIG.MAP_HEIGHT - 5, p.y));
+}
+
+function selectTargetNode(p) {
+    // 라인 할당: 짝수 id = 왼쪽, 홀수 id = 오른쪽
+    const isLeftLane = p.id % 2 === 0;
+    
+    const laneNodes = p.team === 0 
+        ? (isLeftLane 
+            ? ['T1_L', 'A_T2_L', 'B_T2_L', 'B_T3', 'B_Guardian']
+            : ['T1_R', 'A_T2_R', 'B_T2_R', 'B_T3', 'B_Guardian'])
+        : (isLeftLane 
+            ? ['T1_L', 'B_T2_L', 'A_T2_L', 'A_T3', 'A_Guardian']
+            : ['T1_R', 'B_T2_R', 'A_T2_R', 'A_T3', 'A_Guardian']);
+    
+    // 공격 가능한 첫 번째 노드
+    for (const nodeId of laneNodes) {
+        const node = game.nodes[nodeId];
+        if (canAttackNode(node, p.team)) {
+            return nodeId;
         }
     }
     
-    p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
-    p.y = Math.max(5, Math.min(CONFIG.MAP_HEIGHT - 5, p.y));
+    // 없으면 가디언 방어
+    const guardianId = p.team === 0 ? 'A_Guardian' : 'B_Guardian';
+    return guardianId;
+}
+
+function canAttackNode(node, teamId) {
+    if (!node) return false;
+    if (node.locked) return false;
+    if (node.owner === teamId) return false;
+    if (node.tier === 'Base') return false;
+    if (node.tier === 'Breaker' && node.owner !== -1) return false;
+    return true;
+}
+
+function startChanneling(p, nodeId) {
+    const node = game.nodes[nodeId];
+    p.channeling = true;
+    p.channelTarget = nodeId;
+    p.channelProgress = 0;
+}
+
+function cancelChanneling(p) {
+    p.channeling = false;
+    p.channelTarget = null;
+    p.channelProgress = 0;
+}
+
+function completeChanneling(p) {
+    const nodeId = p.channelTarget;
+    const node = game.nodes[nodeId];
+    
+    if (node) {
+        node.owner = p.team;
+        console.log(`노드 ${nodeId} 점령! 팀 ${p.team}`);
+        
+        // XP 보상
+        game.teams[p.team].xp += NODE_SPECS[node.tier].value;
+        checkLevelUp(p.team);
+    }
+    
+    cancelChanneling(p);
 }
 
 function tryAttack(p) {
@@ -640,10 +723,14 @@ io.on('connection', (socket) => {
         io.emit('game_start', { players: lobbyPlayers });
         console.log('게임 시작!');
         
-        // 게임 루프 (60fps)
+        // 게임 루프 (60fps 시뮬, 30fps 전송)
+        let tickCount = 0;
         gameInterval = setInterval(() => {
             update(1 / CONFIG.TPS);
-            broadcastState();
+            tickCount++;
+            if (tickCount % 2 === 0) {  // 30fps 전송
+                broadcastState();
+            }
         }, 1000 / CONFIG.TPS);
     });
     
