@@ -1,12 +1,18 @@
 // PDA 중앙 권위 서버 - 싱글플레이어 로직 기반
+console.log('=== 서버 시작 중... ===');
+
 const http = require('http').createServer((req, res) => {
     res.writeHead(200);
     res.end('PDA Server Running');
 });
 
+console.log('=== HTTP 서버 생성 완료 ===');
+
 const io = require('socket.io')(http, {
     cors: { origin: "*" }
 });
+
+console.log('=== Socket.IO 초기화 완료 ===');
 
 // ==================== CONFIG ====================
 const CONFIG = {
