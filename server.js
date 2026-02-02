@@ -1,4 +1,4 @@
-// PDA 중앙 권위 서버
+// PDA 중앙 권위 서버 - 싱글플레이어 로직 기반
 const http = require('http').createServer((req, res) => {
     res.writeHead(200);
     res.end('PDA Server Running');
@@ -8,144 +8,232 @@ const io = require('socket.io')(http, {
     cors: { origin: "*" }
 });
 
-// ==================== 게임 설정 ====================
+// ==================== CONFIG ====================
 const CONFIG = {
-    TPS: 60,
     MAP_WIDTH: 210,
     MAP_HEIGHT: 210,
-    PLAYER_RADIUS: 1.5,
-    BASE_HP: 200,
-    BASE_HEAL_RATE: 30,
-    VISION_RANGE: 30,
-    RESPAWN_TIME: 5,
-    XP_PER_LEVEL: 100,
-    RECALL_TIME: 3,
+    TPS: 60,
+    PLAYER_RADIUS: 0.5,
+    ATTACK_RANGE: 10,
+    ATTACK_DAMAGE: 10,
+    ATTACK_COOLDOWN: 0.5,
+    LANE_WIDTH: 15,
+    CHANNEL_RANGE: 1,
+    CHANNEL_FAIL_DELAY: 2,
+    SHIELD_BASE: 40,
+    SHIELD_PER_LEVEL: 10,
+    KILL_XP: 4,
+    XP_PER_LEVEL: 12,
+    MAX_LEVEL: 5,
+    BASE_SPEED: 3,
+    VISION_RANGE: 18,
+    RECALL_TIME: 4,
+    BASE_HEAL_RATE: 20,
 };
 
 const WEAPON_SPECS = {
     'melee': {
-        damage: 20, attackSpeed: 1.2, range: 3, speed: 25, armor: 0.2,
-        dashDist: 12, dashCool: 4, ultDamage: 120, ultRadius: 8, ultCool: 30, ultStun: 1.5
+        speedMult: 1.8, range: 3, dpsMult: 0.85, shieldMult: 0.8, armor: 0.2,
+        dashDist: 4, dashCool: 3, ultRadius: 8, ultDamage: 40, ultCool: 20,
     },
     'ranged': {
-        damage: 14, attackSpeed: 0.7, range: 14, speed: 22, armor: 0,
-        dashDist: 8, dashCool: 6, ultDamage: 80, ultRadius: 6, ultCool: 25, ultStun: 0
-    }
+        speedMult: 1.4, range: 14, dpsMult: 0.8, shieldMult: 1.2, armor: 0.1,
+        dashDist: 7, dashCool: 8, ultRadius: 6, ultDamage: 35, ultCool: 25,
+    },
 };
 
-const NODE_SPECS = {
-    'Base': { radius: 8, hp: 9999, channelTime: 999, dps: 0, range: 0 },
-    'Guardian': { radius: 6, hp: 500, channelTime: 9.0, dps: 4.0, range: 10 },
-    'T3': { radius: 5, hp: 400, channelTime: 9.1, dps: 6.0, range: 14 },
-    'T2': { radius: 7, hp: 300, channelTime: 6.2, dps: 2.5, range: 8 },
-    'T1': { radius: 7, hp: 200, channelTime: 3.0, dps: 1.5, range: 5 },
-    'Breaker': { radius: 5, hp: 0, channelTime: 8.4, dps: 0, range: 0 },
-};
+const ULT_REQUIRED_LEVEL = 2;
+const ULT_INITIAL_COOL = 10;
 
 const NODE_POSITIONS = {
-    'A_Base': { x: 25, y: 25, type: 'Base', team: 0 },
-    'A_Guardian': { x: 50, y: 50, type: 'Guardian', team: 0 },
-    'A_T3': { x: 75, y: 75, type: 'T3', team: 0 },
-    'A_T2_L': { x: 55, y: 105, type: 'T2', team: 0 },
-    'A_T2_R': { x: 105, y: 55, type: 'T2', team: 0 },
-    'T1_L': { x: 55, y: 155, type: 'T1', team: -1 },
-    'T1_R': { x: 155, y: 55, type: 'T1', team: -1 },
-    'B_T2_L': { x: 105, y: 155, type: 'T2', team: 1 },
-    'B_T2_R': { x: 155, y: 105, type: 'T2', team: 1 },
-    'B_T3': { x: 135, y: 135, type: 'T3', team: 1 },
-    'B_Guardian': { x: 160, y: 160, type: 'Guardian', team: 1 },
-    'B_Base': { x: 185, y: 185, type: 'Base', team: 1 },
-    'Breaker': { x: 105, y: 105, type: 'Breaker', team: -1 },
+    'A_Base': { x: 105, y: 200, tier: 'Base', team: 0, initOwner: 0, initLocked: true },
+    'A_Guardian': { x: 105, y: 185, tier: 'Guardian', team: 0, initOwner: 0, initLocked: true },
+    'A_T3': { x: 105, y: 165, tier: 'T3', team: 0, initOwner: -1, initLocked: true },
+    'A_T2_L': { x: 50, y: 140, tier: 'T2', team: 0, initOwner: -1, initLocked: true },
+    'A_T2_R': { x: 160, y: 140, tier: 'T2', team: 0, initOwner: -1, initLocked: true },
+    'T1_L': { x: 35, y: 105, tier: 'T1', team: -1, initOwner: -1, initLocked: false },
+    'T1_R': { x: 175, y: 105, tier: 'T1', team: -1, initOwner: -1, initLocked: false },
+    'Breaker': { x: 105, y: 105, tier: 'Breaker', team: -1, initOwner: -1, initLocked: true },
+    'B_T2_L': { x: 50, y: 70, tier: 'T2', team: 1, initOwner: -1, initLocked: true },
+    'B_T2_R': { x: 160, y: 70, tier: 'T2', team: 1, initOwner: -1, initLocked: true },
+    'B_T3': { x: 105, y: 45, tier: 'T3', team: 1, initOwner: -1, initLocked: true },
+    'B_Guardian': { x: 105, y: 25, tier: 'Guardian', team: 1, initOwner: 1, initLocked: true },
+    'B_Base': { x: 105, y: 10, tier: 'Base', team: 1, initOwner: 1, initLocked: true },
 };
 
-// ==================== 게임 상태 ====================
+const NODE_CONNECTIONS = [
+    ['A_Base', 'A_Guardian'], ['A_Guardian', 'A_T3'],
+    ['A_T3', 'A_T2_L'], ['A_T3', 'A_T2_R'], ['A_T3', 'Breaker'],
+    ['A_T2_L', 'T1_L'], ['A_T2_R', 'T1_R'],
+    ['T1_L', 'B_T2_L'], ['T1_R', 'B_T2_R'],
+    ['B_T2_L', 'B_T3'], ['B_T2_R', 'B_T3'], ['Breaker', 'B_T3'],
+    ['B_T3', 'B_Guardian'], ['B_Guardian', 'B_Base'],
+    ['T1_L', 'Breaker'], ['T1_R', 'Breaker'],
+    ['A_T2_L', 'Breaker'], ['A_T2_R', 'Breaker'],
+    ['B_T2_L', 'Breaker'], ['B_T2_R', 'Breaker'],
+];
+
+const NODE_GRAPH = {};
+for (const [a, b] of NODE_CONNECTIONS) {
+    if (!NODE_GRAPH[a]) NODE_GRAPH[a] = [];
+    if (!NODE_GRAPH[b]) NODE_GRAPH[b] = [];
+    if (!NODE_GRAPH[a].includes(b)) NODE_GRAPH[a].push(b);
+    if (!NODE_GRAPH[b].includes(a)) NODE_GRAPH[b].push(a);
+}
+
+const NODE_SPECS = {
+    'Base': { radius: 8, hp: 9999, channelTime: 999, dps: 0, range: 0, value: 0 },
+    'Guardian': { radius: 6, hp: 500, channelTime: 9.0, dps: 4.0, range: 10, value: 10 },
+    'T3': { radius: 5, hp: 400, channelTime: 9.1, dps: 6.0, range: 14, value: 5 },
+    'T2': { radius: 7, hp: 300, channelTime: 6.2, dps: 2.5, range: 8, value: 3 },
+    'T1': { radius: 7, hp: 200, channelTime: 3.0, dps: 1.5, range: 5, value: 2 },
+    'Breaker': { radius: 5, hp: 0, channelTime: 8.4, dps: 0, range: 0, value: 0 },
+};
+
+// ==================== GAME STATE ====================
 let lobbyPlayers = [];
 let gameStarted = false;
 let game = null;
 let gameInterval = null;
 
+// ==================== UTILITY ====================
+function distance(a, b) {
+    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function getTeamLevel(teamId) {
+    return game ? game.teams[teamId].level : 1;
+}
+
+function getShieldAtLevel(level) {
+    return CONFIG.SHIELD_BASE + CONFIG.SHIELD_PER_LEVEL * level;
+}
+
+function getWeaponLevelMult(weaponLevel) {
+    return 1 + (weaponLevel - 1) * 0.15;
+}
+
+function getPlayerSpeed(p) {
+    return CONFIG.BASE_SPEED * WEAPON_SPECS[p.weaponType].speedMult;
+}
+
+function getPlayerRange(p) {
+    return WEAPON_SPECS[p.weaponType].range;
+}
+
+function getPlayerDamage(p) {
+    const weaponMult = getWeaponLevelMult(p.weaponLevel);
+    return CONFIG.ATTACK_DAMAGE * WEAPON_SPECS[p.weaponType].dpsMult * weaponMult;
+}
+
+function isAtBase(p) {
+    const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
+    const base = game.nodes[baseId];
+    return distance(p, base) < 20;
+}
+
+// ==================== INIT GAME ====================
 function initGame() {
     game = {
         tick: 0,
         time: 0,
         players: [],
         nodes: {},
-        teams: [{ level: 1, xp: 0 }, { level: 1, xp: 0 }],
+        teams: [{ xp: 0, level: 1 }, { xp: 0, level: 1 }],
         winner: null,
+        aGuardianUnlocked: false,
+        bGuardianUnlocked: false,
         breakerSpawned: false,
+        breakerClaimCount: 0,
     };
     
     // 노드 초기화
-    for (const [id, pos] of Object.entries(NODE_POSITIONS)) {
-        const spec = NODE_SPECS[pos.type];
+    for (const [id, data] of Object.entries(NODE_POSITIONS)) {
         game.nodes[id] = {
-            id, x: pos.x, y: pos.y, type: pos.type,
-            owner: pos.team, hp: spec.hp, maxHp: spec.hp,
+            id,
+            x: data.x,
+            y: data.y,
+            tier: data.tier,
+            team: data.team,
+            owner: data.initOwner,
+            locked: data.initLocked,
+            hp: NODE_SPECS[data.tier].hp,
+            maxHp: NODE_SPECS[data.tier].hp,
         };
     }
     
-    // 플레이어 초기화 (8명)
-    const blueInLobby = lobbyPlayers.filter(p => p.team === 0);
-    const redInLobby = lobbyPlayers.filter(p => p.team === 1);
+    // 인간 플레이어 매칭
+    const blueHumans = lobbyPlayers.filter(p => p.team === 0);
+    const redHumans = lobbyPlayers.filter(p => p.team === 1);
     
-    // 블루팀 (4명)
+    // 팀 A (0-3)
     for (let i = 0; i < 4; i++) {
-        const lobbyP = blueInLobby[i];
+        const human = blueHumans[i];
         game.players.push({
             id: i,
-            odI: lobbyP ? lobbyP.id : null,
+            odI: human ? human.id : null,
             team: 0,
-            x: 30 + (i % 2) * 10,
-            y: 30 + Math.floor(i / 2) * 10,
-            hp: CONFIG.BASE_HP,
-            maxHp: CONFIG.BASE_HP,
+            x: 102 + (i % 2) * 6,
+            y: 195 - Math.floor(i / 2) * 3,
+            hp: 100,
+            maxHp: 100,
+            isAI: !human,
+            level: 1,
+            attackCooldown: 0,
+            respawnTimer: 0,
             alive: true,
-            isAI: !lobbyP,
             weaponType: i === 0 ? 'melee' : (i % 2 === 0 ? 'melee' : 'ranged'),
             weaponLevel: 1,
             weaponPoints: 0,
-            attackCooldown: 0,
             dashCooldown: 0,
-            ultCooldown: 0,
-            stunTimer: 0,
-            respawnTimer: 0,
-            channeling: false,
+            ultCooldown: ULT_INITIAL_COOL,
             recalling: false,
-            input: { w: false, a: false, s: false, d: false, f: false, b: false, mouseDown: false, mouseX: 0, mouseY: 0 },
-            aiTarget: null,
+            recallProgress: 0,
+            channeling: false,
+            channelTarget: null,
+            channelProgress: 0,
+            stunTimer: 0,
+            input: {},
+            currentNode: 'A_Guardian',
         });
     }
     
-    // 레드팀 (4명)
+    // 팀 B (4-7)
     for (let i = 0; i < 4; i++) {
-        const lobbyP = redInLobby[i];
+        const human = redHumans[i];
         game.players.push({
             id: i + 4,
-            odI: lobbyP ? lobbyP.id : null,
+            odI: human ? human.id : null,
             team: 1,
-            x: 180 - (i % 2) * 10,
-            y: 180 - Math.floor(i / 2) * 10,
-            hp: CONFIG.BASE_HP,
-            maxHp: CONFIG.BASE_HP,
+            x: 102 + (i % 2) * 6,
+            y: 15 + Math.floor(i / 2) * 3,
+            hp: 100,
+            maxHp: 100,
+            isAI: !human,
+            level: 1,
+            attackCooldown: 0,
+            respawnTimer: 0,
             alive: true,
-            isAI: !lobbyP,
             weaponType: i % 2 === 0 ? 'melee' : 'ranged',
             weaponLevel: 1,
             weaponPoints: 0,
-            attackCooldown: 0,
             dashCooldown: 0,
-            ultCooldown: 0,
-            stunTimer: 0,
-            respawnTimer: 0,
-            channeling: false,
+            ultCooldown: ULT_INITIAL_COOL,
             recalling: false,
-            input: { w: false, a: false, s: false, d: false, f: false, b: false, mouseDown: false, mouseX: 0, mouseY: 0 },
-            aiTarget: null,
+            recallProgress: 0,
+            channeling: false,
+            channelTarget: null,
+            channelProgress: 0,
+            stunTimer: 0,
+            input: {},
+            currentNode: 'B_Guardian',
         });
     }
+    
+    console.log('게임 초기화 완료! 플레이어:', game.players.length);
 }
 
-// ==================== 게임 로직 ====================
+// ==================== UPDATE ====================
 function update(dt) {
     if (!game || game.winner !== null) return;
     
@@ -161,6 +249,7 @@ function update(dt) {
             continue;
         }
         
+        // 스턴 중
         if (p.stunTimer > 0) {
             p.stunTimer -= dt;
             continue;
@@ -178,12 +267,18 @@ function update(dt) {
         if (p.ultCooldown > 0) p.ultCooldown -= dt;
     }
     
-    // 승리 조건 체크
+    // 타워 공격
+    updateTowerAttacks(dt);
+    
+    // 노드 잠금 상태 업데이트
+    updateNodeLocks();
+    
+    // 승리 조건
     checkWinCondition();
 }
 
 function updatePlayer(p, dt) {
-    const input = p.input;
+    const input = p.input || {};
     
     // 베이스 힐
     if (isAtBase(p) && p.hp < p.maxHp) {
@@ -199,6 +294,7 @@ function updatePlayer(p, dt) {
     if (p.recalling) {
         if (!input.b || input.w || input.a || input.s || input.d) {
             p.recalling = false;
+            p.recallProgress = 0;
         } else {
             p.recallProgress += dt;
             if (p.recallProgress >= CONFIG.RECALL_TIME) {
@@ -208,6 +304,7 @@ function updatePlayer(p, dt) {
                 p.y = base.y + (p.team === 0 ? -10 : 10);
                 p.hp = p.maxHp;
                 p.recalling = false;
+                p.recallProgress = 0;
             }
         }
         return;
@@ -222,7 +319,7 @@ function updatePlayer(p, dt) {
     
     if (vx !== 0 || vy !== 0) {
         const len = Math.sqrt(vx * vx + vy * vy);
-        const speed = WEAPON_SPECS[p.weaponType].speed;
+        const speed = getPlayerSpeed(p);
         p.x += (vx / len) * speed * dt;
         p.y += (vy / len) * speed * dt;
         p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
@@ -236,48 +333,80 @@ function updatePlayer(p, dt) {
 }
 
 function updateAI(p, dt) {
-    // 간단한 AI - 가장 가까운 적 또는 노드로 이동
-    const enemies = game.players.filter(e => e.team !== p.team && e.alive);
-    const spec = WEAPON_SPECS[p.weaponType];
+    // 베이스 힐
+    if (isAtBase(p) && p.hp < p.maxHp) {
+        p.hp = Math.min(p.maxHp, p.hp + CONFIG.BASE_HEAL_RATE * dt);
+        if (p.hp < p.maxHp * 0.8) return; // 80% 회복까지 대기
+    }
     
-    // 타겟 선택
+    // HP 낮으면 귀환
+    if (p.hp < p.maxHp * 0.3 && !isAtBase(p)) {
+        const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
+        const base = game.nodes[baseId];
+        const dx = base.x - p.x;
+        const dy = base.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const speed = getPlayerSpeed(p);
+        p.x += (dx / dist) * speed * dt;
+        p.y += (dy / dist) * speed * dt;
+        return;
+    }
+    
+    // 적 찾기
+    const enemies = game.players.filter(e => e.team !== p.team && e.alive);
     let target = null;
     let minDist = Infinity;
     
     for (const e of enemies) {
         const d = distance(p, e);
-        if (d < minDist) {
+        if (d < minDist && d < 30) {
             minDist = d;
             target = e;
         }
     }
     
-    if (!target) return;
+    const spec = WEAPON_SPECS[p.weaponType];
     
-    // 이동
-    const dx = target.x - p.x;
-    const dy = target.y - p.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    if (dist > spec.range * 0.8) {
-        const speed = spec.speed;
-        p.x += (dx / dist) * speed * dt;
-        p.y += (dy / dist) * speed * dt;
-        p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
-        p.y = Math.max(5, Math.min(CONFIG.MAP_HEIGHT - 5, p.y));
-    }
-    
-    // 공격
-    if (dist <= spec.range && p.attackCooldown <= 0) {
-        const damage = spec.damage * (1 + (p.weaponLevel - 1) * 0.1);
-        const armor = WEAPON_SPECS[target.weaponType].armor;
-        target.hp -= damage * (1 - armor);
-        p.attackCooldown = 1 / spec.attackSpeed;
+    if (target) {
+        // 적 추적
+        const dx = target.x - p.x;
+        const dy = target.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
         
-        if (target.hp <= 0) {
-            killPlayer(target, p);
+        if (dist > spec.range * 0.8) {
+            const speed = getPlayerSpeed(p);
+            p.x += (dx / dist) * speed * dt;
+            p.y += (dy / dist) * speed * dt;
+        }
+        
+        // 공격
+        if (dist <= spec.range && p.attackCooldown <= 0) {
+            const damage = getPlayerDamage(p);
+            const armor = WEAPON_SPECS[target.weaponType].armor;
+            target.hp -= damage * (1 - armor);
+            p.attackCooldown = CONFIG.ATTACK_COOLDOWN;
+            
+            if (target.hp <= 0) {
+                killPlayer(target, p);
+            }
+        }
+    } else {
+        // 적 없으면 중앙으로 이동
+        const midX = 105;
+        const midY = 105;
+        const dx = midX - p.x;
+        const dy = midY - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist > 30) {
+            const speed = getPlayerSpeed(p);
+            p.x += (dx / dist) * speed * dt;
+            p.y += (dy / dist) * speed * dt;
         }
     }
+    
+    p.x = Math.max(5, Math.min(CONFIG.MAP_WIDTH - 5, p.x));
+    p.y = Math.max(5, Math.min(CONFIG.MAP_HEIGHT - 5, p.y));
 }
 
 function tryAttack(p) {
@@ -296,10 +425,10 @@ function tryAttack(p) {
     }
     
     if (closest) {
-        const damage = spec.damage * (1 + (p.weaponLevel - 1) * 0.1);
+        const damage = getPlayerDamage(p);
         const armor = WEAPON_SPECS[closest.weaponType].armor;
         closest.hp -= damage * (1 - armor);
-        p.attackCooldown = 1 / spec.attackSpeed;
+        p.attackCooldown = CONFIG.ATTACK_COOLDOWN;
         
         if (closest.hp <= 0) {
             killPlayer(closest, p);
@@ -309,11 +438,13 @@ function tryAttack(p) {
 
 function killPlayer(victim, killer) {
     victim.alive = false;
-    victim.respawnTimer = CONFIG.RESPAWN_TIME;
+    victim.hp = 0;
+    const targetTeamLevel = getTeamLevel(victim.team);
+    victim.respawnTimer = 6 + 2 * targetTeamLevel;
     
-    // XP 보상
+    // XP
     if (killer) {
-        game.teams[killer.team].xp += 30;
+        game.teams[killer.team].xp += CONFIG.KILL_XP;
         checkLevelUp(killer.team);
     }
 }
@@ -322,7 +453,7 @@ function respawn(p) {
     const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
     const base = game.nodes[baseId];
     p.x = base.x + (Math.random() - 0.5) * 10;
-    p.y = base.y + (p.team === 0 ? -10 : 10) + (Math.random() - 0.5) * 10;
+    p.y = base.y + (p.team === 0 ? -10 : 10);
     p.hp = p.maxHp;
     p.alive = true;
     p.stunTimer = 0;
@@ -332,10 +463,9 @@ function respawn(p) {
 
 function checkLevelUp(teamId) {
     const team = game.teams[teamId];
-    while (team.xp >= CONFIG.XP_PER_LEVEL && team.level < 10) {
+    while (team.xp >= CONFIG.XP_PER_LEVEL && team.level < CONFIG.MAX_LEVEL) {
         team.xp -= CONFIG.XP_PER_LEVEL;
         team.level++;
-        // 무기 포인트 지급
         for (const p of game.players) {
             if (p.team === teamId) {
                 p.weaponPoints++;
@@ -344,28 +474,81 @@ function checkLevelUp(teamId) {
     }
 }
 
-function checkWinCondition() {
-    const aGuardian = game.nodes['A_Guardian'];
-    const bGuardian = game.nodes['B_Guardian'];
-    
-    if (aGuardian.owner === 1) {
-        game.winner = 1;
-    } else if (bGuardian.owner === 0) {
-        game.winner = 0;
+function updateTowerAttacks(dt) {
+    for (const [id, node] of Object.entries(game.nodes)) {
+        const spec = NODE_SPECS[node.tier];
+        if (spec.dps <= 0 || spec.range <= 0) continue;
+        if (node.owner === -1) continue;
+        
+        const enemyTeam = 1 - node.owner;
+        const enemiesInRange = [];
+        
+        for (const p of game.players) {
+            if (p.team !== enemyTeam || !p.alive) continue;
+            if (distance(p, node) < spec.range) {
+                enemiesInRange.push(p);
+            }
+        }
+        
+        if (enemiesInRange.length === 0) continue;
+        
+        const dpsPerTarget = spec.dps / enemiesInRange.length;
+        
+        for (const p of enemiesInRange) {
+            if (p.channeling) continue;
+            const damage = dpsPerTarget * dt;
+            p.hp -= damage;
+            
+            if (p.hp <= 0) {
+                p.alive = false;
+                p.hp = 0;
+                const targetTeamLevel = getTeamLevel(p.team);
+                p.respawnTimer = 6 + 2 * targetTeamLevel;
+            }
+        }
     }
 }
 
-function isAtBase(p) {
-    const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
-    const base = game.nodes[baseId];
-    return distance(p, base) < NODE_SPECS['Base'].radius + 5;
+function updateNodeLocks() {
+    if (game.nodes['T1_L'].owner !== -1) {
+        game.nodes['A_T2_L'].locked = false;
+        game.nodes['B_T2_L'].locked = false;
+    }
+    if (game.nodes['T1_R'].owner !== -1) {
+        game.nodes['A_T2_R'].locked = false;
+        game.nodes['B_T2_R'].locked = false;
+    }
+    if (game.nodes['A_T2_L'].owner !== -1 || game.nodes['A_T2_R'].owner !== -1) {
+        game.nodes['A_T3'].locked = false;
+    }
+    if (game.nodes['B_T2_L'].owner !== -1 || game.nodes['B_T2_R'].owner !== -1) {
+        game.nodes['B_T3'].locked = false;
+    }
+    if (game.nodes['A_T3'].owner === 1) {
+        game.aGuardianUnlocked = true;
+    }
+    if (game.nodes['B_T3'].owner === 0) {
+        game.bGuardianUnlocked = true;
+    }
+    if (game.aGuardianUnlocked) {
+        game.nodes['A_Guardian'].locked = false;
+    }
+    if (game.bGuardianUnlocked) {
+        game.nodes['B_Guardian'].locked = false;
+    }
 }
 
-function distance(a, b) {
-    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+function checkWinCondition() {
+    if (game.nodes['A_Guardian'].owner === 1) {
+        game.winner = 1;
+        console.log('🔴 레드팀 승리!');
+    } else if (game.nodes['B_Guardian'].owner === 0) {
+        game.winner = 0;
+        console.log('🔵 블루팀 승리!');
+    }
 }
 
-// ==================== 상태 전송 ====================
+// ==================== BROADCAST STATE ====================
 function broadcastState() {
     if (!game) return;
     
@@ -395,20 +578,21 @@ function broadcastState() {
     
     for (const [id, node] of Object.entries(game.nodes)) {
         state.nodes[id] = {
+            id,
             x: node.x,
             y: node.y,
-            tier: node.type,  // type을 tier로 전송
+            tier: node.tier,
             owner: node.owner,
+            locked: node.locked,
             hp: Math.round(node.hp),
             maxHp: node.maxHp,
-            locked: false,
         };
     }
     
     io.emit('game_state', state);
 }
 
-// ==================== 소켓 이벤트 ====================
+// ==================== SOCKET EVENTS ====================
 io.on('connection', (socket) => {
     console.log('플레이어 접속:', socket.id);
     
@@ -426,7 +610,7 @@ io.on('connection', (socket) => {
         };
         lobbyPlayers.push(player);
         
-        const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+        const hostId = lobbyPlayers[0].id;
         io.emit('lobby_update', { players: lobbyPlayers, hostId });
         console.log('로비:', lobbyPlayers.map(p => p.name));
     });
@@ -435,7 +619,7 @@ io.on('connection', (socket) => {
         const player = lobbyPlayers.find(p => p.id === socket.id);
         if (player) {
             player.team = team;
-            const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+            const hostId = lobbyPlayers[0].id;
             io.emit('lobby_update', { players: lobbyPlayers, hostId });
         }
     });
@@ -449,7 +633,7 @@ io.on('connection', (socket) => {
         io.emit('game_start', { players: lobbyPlayers });
         console.log('게임 시작!');
         
-        // 게임 루프 시작 (60fps)
+        // 게임 루프 (60fps)
         gameInterval = setInterval(() => {
             update(1 / CONFIG.TPS);
             broadcastState();
@@ -469,12 +653,11 @@ io.on('connection', (socket) => {
         console.log('플레이어 퇴장:', socket.id);
         lobbyPlayers = lobbyPlayers.filter(p => p.id !== socket.id);
         
-        if (!gameStarted) {
-            const hostId = lobbyPlayers.length > 0 ? lobbyPlayers[0].id : null;
+        if (!gameStarted && lobbyPlayers.length > 0) {
+            const hostId = lobbyPlayers[0].id;
             io.emit('lobby_update', { players: lobbyPlayers, hostId });
         }
         
-        // 모두 나가면 게임 리셋
         if (lobbyPlayers.length === 0 && gameStarted) {
             clearInterval(gameInterval);
             gameStarted = false;
