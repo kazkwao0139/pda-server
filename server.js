@@ -262,6 +262,10 @@ function initGame() {
         breakerSpawned: false,
         breakerClaimCount: 0,
         firstStalemateTime: -1,
+        // 이펙트
+        ultEffects: [],
+        dashEffects: [],
+        attackEffects: [],
     };
     
     // 노드 초기화
@@ -419,6 +423,20 @@ function update(dt) {
     
     // 승리 조건
     checkWinCondition();
+    
+    // 이펙트 타이머 업데이트
+    for (let i = game.ultEffects.length - 1; i >= 0; i--) {
+        game.ultEffects[i].timer -= dt;
+        if (game.ultEffects[i].timer <= 0) game.ultEffects.splice(i, 1);
+    }
+    for (let i = game.dashEffects.length - 1; i >= 0; i--) {
+        game.dashEffects[i].timer -= dt;
+        if (game.dashEffects[i].timer <= 0) game.dashEffects.splice(i, 1);
+    }
+    for (let i = game.attackEffects.length - 1; i >= 0; i--) {
+        game.attackEffects[i].timer -= dt;
+        if (game.attackEffects[i].timer <= 0) game.attackEffects.splice(i, 1);
+    }
 }
 
 function updatePlayer(p, dt) {
@@ -915,6 +933,9 @@ function aiDash(p, dirX, dirY) {
     const len = Math.sqrt(dirX * dirX + dirY * dirY);
     if (len === 0) return false;
     
+    const startX = p.x;
+    const startY = p.y;
+    
     const dx = (dirX / len) * spec.dashDist;
     const dy = (dirY / len) * spec.dashDist;
     
@@ -933,6 +954,14 @@ function aiDash(p, dirX, dirY) {
     p.x = dashX;
     p.y = dashY;
     p.dashCooldown = spec.dashCool;
+    
+    // 대시 이펙트
+    game.dashEffects.push({
+        x1: startX, y1: startY,
+        x2: dashX, y2: dashY,
+        team: p.team,
+        timer: 0.2,
+    });
     
     return true;
 }
@@ -995,6 +1024,15 @@ function aiUseUlt(p) {
         }
     }
     
+    // 궁극기 이펙트
+    game.ultEffects.push({
+        x: ultX,
+        y: ultY,
+        radius: spec.ultRadius,
+        team: p.team,
+        timer: 0.5,
+    });
+    
     p.ultCooldown = spec.ultCool;
     return true;
 }
@@ -1036,6 +1074,14 @@ function attack(p, target) {
     const damage = getPlayerDamage(p);
     const armor = WEAPON_SPECS[target.weaponType].armor;
     const finalDamage = damage * (1 - armor);
+    
+    // 공격 이펙트
+    game.attackEffects.push({
+        x1: p.x, y1: p.y,
+        x2: target.x, y2: target.y,
+        team: p.team,
+        timer: 0.1,
+    });
     
     // 채널링 중이면 보호막 먼저
     if (target.channeling && target.channelShield > 0) {
@@ -1560,6 +1606,7 @@ function broadcastState() {
         time: game.time,
         players: game.players.map(p => ({
             id: p.id,
+            socketId: p.odI,
             x: Math.round(p.x * 10) / 10,
             y: Math.round(p.y * 10) / 10,
             hp: Math.round(p.hp),
@@ -1590,6 +1637,9 @@ function broadcastState() {
         winner: game.winner,
         breakerSpawned: game.breakerSpawned,
         breakerClaimCount: game.breakerClaimCount,
+        ultEffects: game.ultEffects,
+        dashEffects: game.dashEffects,
+        attackEffects: game.attackEffects,
     };
     
     for (const [id, node] of Object.entries(game.nodes)) {
