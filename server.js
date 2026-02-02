@@ -88,7 +88,7 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
     console.log('========================================');
     console.log('  PDA 멀티플레이어 서버 시작!');
