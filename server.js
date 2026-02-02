@@ -390,6 +390,8 @@ function initGame() {
             hasBreakerbuff: false,
             targetNode: null,
             currentNode: 'A_Guardian',
+            aiAction: null,       // 현재 AI 행동
+            aiActionTimer: 0,     // 행동 유지 시간
             input: {},
         });
     }
@@ -429,6 +431,8 @@ function initGame() {
             hasBreakerbuff: false,
             targetNode: null,
             currentNode: 'B_Guardian',
+            aiAction: null,
+            aiActionTimer: 0,
             input: {},
         });
     }
@@ -1292,7 +1296,14 @@ function updateAI(p, dt) {
     }
     
     if (lowHP || inCombat) {
-        const action = feDecideAction(p, sit);
+        // 행동 결정은 0.3초마다 (버벅임 방지)
+        p.aiActionTimer -= dt;
+        if (p.aiActionTimer <= 0) {
+            p.aiAction = feDecideAction(p, sit);
+            p.aiActionTimer = 0.3 + Math.random() * 0.2; // 0.3~0.5초
+        }
+        
+        const action = p.aiAction || 'attack';
         
         if (action === 'retreat') {
             p.targetNode = null;
