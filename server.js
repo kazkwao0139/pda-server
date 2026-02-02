@@ -565,15 +565,22 @@ function broadcastState() {
             team: p.team,
             weaponType: p.weaponType,
             weaponLevel: p.weaponLevel,
-            stunTimer: p.stunTimer > 0 ? 1 : 0,
+            weaponPoints: p.weaponPoints,
+            dashCooldown: Math.round(p.dashCooldown * 10) / 10,
+            ultCooldown: Math.round(p.ultCooldown * 10) / 10,
+            attackCooldown: p.attackCooldown,
+            stunTimer: p.stunTimer > 0 ? p.stunTimer : 0,
             channeling: p.channeling,
             recalling: p.recalling,
+            recallProgress: p.recallProgress || 0,
             respawnTimer: Math.round(p.respawnTimer * 10) / 10,
             isAI: p.isAI,
         })),
         nodes: {},
         teams: game.teams,
         winner: game.winner,
+        breakerSpawned: game.breakerSpawned,
+        breakerClaimCount: game.breakerClaimCount,
     };
     
     for (const [id, node] of Object.entries(game.nodes)) {
