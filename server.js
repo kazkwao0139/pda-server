@@ -1501,10 +1501,10 @@ function tryStartChanneling(p) {
 function tryAttack(p) {
     const spec = WEAPON_SPECS[p.weaponType];
     const enemies = game.players.filter(e => e.team !== p.team && e.alive);
-    
+
     let closest = null;
     let minDist = spec.range;
-    
+
     for (const e of enemies) {
         const d = distance(p, e);
         if (d < minDist) {
@@ -1512,26 +1512,9 @@ function tryAttack(p) {
             closest = e;
         }
     }
-    
+
     if (closest) {
-        const damage = getPlayerDamage(p);
-        const armor = WEAPON_SPECS[closest.weaponType].armor;
-        closest.hp -= damage * (1 - armor);
-        p.attackCooldown = CONFIG.ATTACK_COOLDOWN;
-        
-        // 공격 이펙트
-        game.attackEffects.push({
-            x1: p.x,
-            y1: p.y,
-            x2: closest.x,
-            y2: closest.y,
-            team: p.team,
-            timer: 0.1,
-        });
-        
-        if (closest.hp <= 0) {
-            killPlayer(closest, p);
-        }
+        attack(p, closest);
     }
 }
 
