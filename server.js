@@ -661,16 +661,24 @@ function updatePlayer(p, dt) {
             if (distance({x: ultX, y: ultY}, enemy) < spec.ultRadius) {
                 const armor = WEAPON_SPECS[enemy.weaponType].armor;
                 const finalDamage = spec.ultDamage * (1 - armor);
-                enemy.hp -= finalDamage;
-                
+
                 if (enemy.recalling) {
                     enemy.recalling = false;
                     enemy.recallProgress = 0;
                 }
-                if (enemy.channeling) {
-                    failChanneling(enemy);
+
+                // 채널링 중이면 보호막 먼저, 초과분 HP로
+                if (enemy.channeling && enemy.channelShield > 0) {
+                    enemy.channelShield -= finalDamage;
+                    if (enemy.channelShield <= 0) {
+                        const overflow = -enemy.channelShield;
+                        failChanneling(enemy);
+                        enemy.hp -= overflow;
+                    }
+                } else {
+                    enemy.hp -= finalDamage;
                 }
-                
+
                 if (enemy.hp <= 0) {
                     enemy.alive = false;
                     enemy.hp = 0;
@@ -1112,13 +1120,15 @@ function aiUseUlt(p) {
                 enemy.recalling = false;
                 enemy.recallProgress = 0;
             }
-            if (enemy.channeling) {
+            if (enemy.channeling && enemy.channelShield > 0) {
                 enemy.channelShield -= spec.ultDamage;
                 if (enemy.channelShield <= 0) {
+                    const overflow = -enemy.channelShield;
                     failChanneling(enemy);
+                    enemy.hp -= overflow;
                 }
             }
-            
+
             if (enemy.hp <= 0) {
                 enemy.hp = 0;
                 enemy.alive = false;
@@ -1188,11 +1198,13 @@ function attack(p, target) {
         timer: 0.1,
     });
     
-    // 채널링 중이면 보호막 먼저
+    // 채널링 중이면 보호막 먼저, 초과분 HP로
     if (target.channeling && target.channelShield > 0) {
         target.channelShield -= finalDamage;
         if (target.channelShield <= 0) {
+            const overflow = -target.channelShield;
             failChanneling(target);
+            target.hp -= overflow;
         }
     } else {
         target.hp -= finalDamage;
