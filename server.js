@@ -519,12 +519,6 @@ function update(dt) {
 function updatePlayer(p, dt) {
     const input = p.input || {};
     
-    // 스턴 중이면 아무것도 못함
-    if (p.stunTimer > 0) {
-        p.stunTimer -= dt;
-        return;
-    }
-    
     // 무기 교체 (베이스에서만)
     if (isAtBase(p)) {
         if (input['1']) p.weaponType = 'melee';
@@ -812,38 +806,32 @@ function updateMultiChanneling(dt) {
         
         if (team0Channelers.length > 0) {
             const factor = multiChannelFactor(team0Channelers.length);
-            const baseTime = NODE_SPECS[node.tier].channelTime;
-            const effectiveTime = baseTime * factor;
-            const progressRate = dt / effectiveTime;
-            
+
             for (const p of team0Channelers) {
+                let increment = dt / factor;
                 if (p.hasBreakerbuff) {
-                    p.channelProgress += progressRate / (1 - getBreakerbuff());
-                } else {
-                    p.channelProgress += progressRate;
+                    increment /= (1 - getBreakerbuff());
                 }
-                
-                if (p.channelProgress >= 1) {
+                p.channelProgress += increment;
+
+                if (p.channelProgress >= p.channelTime) {
                     completeChanneling(p);
                     break;
                 }
             }
         }
-        
+
         if (team1Channelers.length > 0) {
             const factor = multiChannelFactor(team1Channelers.length);
-            const baseTime = NODE_SPECS[node.tier].channelTime;
-            const effectiveTime = baseTime * factor;
-            const progressRate = dt / effectiveTime;
-            
+
             for (const p of team1Channelers) {
+                let increment = dt / factor;
                 if (p.hasBreakerbuff) {
-                    p.channelProgress += progressRate / (1 - getBreakerbuff());
-                } else {
-                    p.channelProgress += progressRate;
+                    increment /= (1 - getBreakerbuff());
                 }
-                
-                if (p.channelProgress >= 1) {
+                p.channelProgress += increment;
+
+                if (p.channelProgress >= p.channelTime) {
                     completeChanneling(p);
                     break;
                 }
@@ -1114,19 +1102,22 @@ function aiUseUlt(p) {
         if (enemy.team === p.team || !enemy.alive) continue;
         if (distance({ x: ultX, y: ultY }, enemy) < spec.ultRadius) {
             const armor = WEAPON_SPECS[enemy.weaponType].armor;
-            enemy.hp -= spec.ultDamage * (1 - armor);
-            
+            const finalDamage = spec.ultDamage * (1 - armor);
+
             if (enemy.recalling) {
                 enemy.recalling = false;
                 enemy.recallProgress = 0;
             }
+
             if (enemy.channeling && enemy.channelShield > 0) {
-                enemy.channelShield -= spec.ultDamage;
+                enemy.channelShield -= finalDamage;
                 if (enemy.channelShield <= 0) {
                     const overflow = -enemy.channelShield;
                     failChanneling(enemy);
                     enemy.hp -= overflow;
                 }
+            } else {
+                enemy.hp -= finalDamage;
             }
 
             if (enemy.hp <= 0) {
@@ -1161,8 +1152,17 @@ function aiDoAttack(p, target, dt) {
         const dx = target.x - p.x;
         const dy = target.y - p.y;
         const speed = getPlayerSpeed(p);
-        p.x += (dx / d) * speed * dt;
-        p.y += (dy / d) * speed * dt;
+        const newX = p.x + (dx / d) * speed * dt;
+        const newY = p.y + (dy / d) * speed * dt;
+
+        if (isOnRoad(newX, newY)) {
+            p.x = newX;
+            p.y = newY;
+        } else {
+            const nearest = getNearestRoadPosition(newX, newY);
+            p.x = nearest.x;
+            p.y = nearest.y;
+        }
     }
     
     if (d <= range && p.attackCooldown <= 0) {
@@ -1239,9 +1239,6 @@ function updateAI(p, dt) {
     
     // 리콜 금지 타이머 감소
     if (p.noRecallTimer > 0) p.noRecallTimer -= dt;
-    
-    // 상태 처리
-    if (p.stunTimer > 0) { p.stunTimer -= dt; return; }
     
     if (p.recalling) {
         p.recallProgress += dt;
@@ -1530,19 +1527,6 @@ function tryAttack(p) {
     }
 }
 
-function killPlayer(victim, killer) {
-    victim.alive = false;
-    victim.hp = 0;
-    const targetTeamLevel = getTeamLevel(victim.team);
-    victim.respawnTimer = 6 + 2 * targetTeamLevel;
-    
-    // XP
-    if (killer) {
-        game.teams[killer.team].xp += CONFIG.KILL_XP;
-        checkLevelUp(killer.team);
-    }
-}
-
 function respawn(p) {
     const baseId = p.team === 0 ? 'A_Base' : 'B_Base';
     const base = game.nodes[baseId];
@@ -1559,19 +1543,6 @@ function respawn(p) {
     p.aiAction = null;
     p.aiActionTimer = 0;
     p.noRecallTimer = 0;
-}
-
-function checkLevelUp(teamId) {
-    const team = game.teams[teamId];
-    while (team.xp >= CONFIG.XP_PER_LEVEL && team.level < CONFIG.MAX_LEVEL) {
-        team.xp -= CONFIG.XP_PER_LEVEL;
-        team.level++;
-        for (const p of game.players) {
-            if (p.team === teamId) {
-                p.weaponPoints++;
-            }
-        }
-    }
 }
 
 function updateTowerAttacks(dt) {
