@@ -151,7 +151,11 @@ function getWeaponLevelMult(weaponLevel) {
 }
 
 function getPlayerSpeed(p) {
-    return CONFIG.BASE_SPEED * WEAPON_SPECS[p.weaponType].speedMult;
+    let speed = CONFIG.BASE_SPEED * WEAPON_SPECS[p.weaponType].speedMult;
+    if (p.hasBreakerbuff) {
+        speed *= (1 + getBreakerbuff());
+    }
+    return speed;
 }
 
 function getPlayerRange(p) {
@@ -363,7 +367,7 @@ function initGame() {
         const human = blueHumans[i];
         game.players.push({
             id: i,
-            odI: human ? human.id : null,
+            socketId: human ? human.id : null,
             team: 0,
             x: 102 + (i % 2) * 6,
             y: 195 - Math.floor(i / 2) * 3,
@@ -405,7 +409,7 @@ function initGame() {
         const human = redHumans[i];
         game.players.push({
             id: i + 4,
-            odI: human ? human.id : null,
+            socketId: human ? human.id : null,
             team: 1,
             x: 102 + (i % 2) * 6,
             y: 15 + Math.floor(i / 2) * 3,
@@ -1745,7 +1749,7 @@ function broadcastState() {
         time: game.time,
         players: game.players.map(p => ({
             id: p.id,
-            socketId: p.odI,
+            socketId: p.socketId,
             x: Math.round(p.x * 10) / 10,
             y: Math.round(p.y * 10) / 10,
             hp: Math.round(p.hp),
@@ -1852,7 +1856,7 @@ io.on('connection', (socket) => {
     socket.on('player_input', (input) => {
         if (!game) return;
         
-        const player = game.players.find(p => p.odI === socket.id);
+        const player = game.players.find(p => p.socketId === socket.id);
         if (player && !player.isAI) {
             player.input = input;
         }
